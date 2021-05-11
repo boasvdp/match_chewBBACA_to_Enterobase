@@ -1,0 +1,4 @@
+FILE	locus_A.fasta	locus_B.fasta	locus_C.fasta
+isolate_1.fasta	1	2	1
+isolate_2.fasta	2	2	3
+isolate_3.fasta	1	1	LNF
