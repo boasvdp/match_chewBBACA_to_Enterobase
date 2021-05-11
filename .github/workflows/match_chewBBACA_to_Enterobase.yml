@@ -37,8 +37,7 @@ jobs:
 
          # Make script executable and activate conda env
          chmod u+x ./match_chewBBACA_to_Enterobase.py
-         conda init bash
-         conda activate env_python
+         echo "${CONDA}/envs/env_python/bin" >> $GITHUB_PATH 
 
          # Check basic functionality
          ! ./match_chewBBACA_to_Enterobase.py
