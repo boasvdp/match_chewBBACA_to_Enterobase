@@ -53,5 +53,5 @@ jobs:
          ./match_chewBBACA_to_Enterobase.py --help
 
          # Run script on test files
-         ./match_chewBBACA_to_Enterobase.py --profiles test/test_profiles.tsv --input test.tsv --st-to-hiercc test_ST_to_hierCC.tsv --output test.csv
+         ./match_chewBBACA_to_Enterobase.py --profiles test/profiles.tsv --input test/input.tsv --st-to-hiercc test/ST_to_HierCC.tsv --output test.csv
          diff -q test/correct.csv test.csv
