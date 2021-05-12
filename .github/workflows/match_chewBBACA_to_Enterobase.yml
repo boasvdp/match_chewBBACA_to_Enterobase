@@ -14,22 +14,32 @@ jobs:
   build:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
+    defaults:
+      run:
+        shell: bash -l {0}
     steps:
       # Install tree using apt to check github repo structure
       - name: apt
         run: sudo apt-get install --no-install-recommends tree
       # Install pandas using conda
-      - name: conda
-        run: |
-          conda create -y -n env_python -c conda-forge pandas=1.2.1
-      # Checks out match_chewBBACA_to_Enterobase under $GITHUB_WORKSPACE so your job can access it
+      - uses: actions/checkout@v2
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          activate-environment: env_python
+          environment-file: envs/python.yml
+          python-version: 3.8
+          auto-activate-base: false
+      - run: |
+          conda info
+          conda list
       - uses: actions/checkout@v2
         with:
           repository: boasvdp/match_chewBBACA_to_Enterobase
           path: match_chewBBACA_to_Enterobase
       - name: directory structure
         run: tree -d $GITHUB_WORKSPACE
+      - name: check active conda env
+        run: echo "Current conda env is $CONDA_DEFAULT_ENV" 
       - name: test match_chewBBACA_to_Enterobase
         run: |
          # Cd into checked out github repo
@@ -37,7 +47,6 @@ jobs:
 
          # Make script executable and activate conda env
          chmod u+x ./match_chewBBACA_to_Enterobase.py
-         echo "${CONDA}/envs/env_python/bin" >> $GITHUB_PATH 
 
          # Check basic functionality
          ! ./match_chewBBACA_to_Enterobase.py
