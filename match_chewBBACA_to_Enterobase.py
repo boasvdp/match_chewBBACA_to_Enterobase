@@ -26,7 +26,7 @@ def timer(func):
   return wrapper
 
 @timer
-def load_results(profiles_file, chewbbaca_output_file):
+def load_results(HC1100_representative_file, chewbbaca_output_file):
   '''
   Load results of cgMLST typing with correct header order.
 
@@ -46,9 +46,9 @@ def load_results(profiles_file, chewbbaca_output_file):
 
   '''
   # Extract header, loci, number of loci
-  header = pd.read_csv(profiles_file, sep = '\t', nrows = 0, dtype=str)
-  loci_header = header.columns[1:]
-  nr_loci = len(header.columns[1:])
+  HC1100_representative = pd.read_csv(HC1100_representative_file, sep = '\t', dtype=str)
+  loci_header = HC1100_representative.columns[2:]
+  nr_loci = len(HC1100_representative.columns[2:])
   # Init header for chewbbaca output
   chewbbaca_output_header = ['FILE']
   # Append .fasta to loci names to correspond to chewBBACA output
@@ -57,10 +57,11 @@ def load_results(profiles_file, chewbbaca_output_file):
   # Read chewBBACA output file with correct column names and order
   chewbbaca_output = pd.read_csv(chewbbaca_output_file, sep = '\t', usecols=chewbbaca_output_header, dtype=str)[chewbbaca_output_header]
   chewbbaca_output.columns = ['FILE'] + list(loci_header)
-  return chewbbaca_output, nr_loci
+  HC1100_representative.drop(columns = 'ST', inplace = True)
+  return HC1100_representative, chewbbaca_output, nr_loci
 
 @timer
-def process_chunk(chunk, chewbbaca_output_isolate, i):
+def process_chunk(chunk, level, chewbbaca_output_isolate, i):
   '''
   Compare a chunk against chewBBACA output and return cgMLSTs.
 
@@ -84,7 +85,7 @@ def process_chunk(chunk, chewbbaca_output_isolate, i):
 
   '''
   # Read STs and shape from chunk
-  df_ST = chunk[['ST']]
+  df_ST = chunk[[level]]
   nr_rows_chunk, nr_cols_chunk = chunk.shape
   # Recreate df with same size as chunk, filled with isolate allelic profile
   chewbbaca_output_comparator = pd.DataFrame(index=range(nr_rows_chunk))
@@ -94,10 +95,10 @@ def process_chunk(chunk, chewbbaca_output_isolate, i):
   # Compare dfs and sum the number of matching cells
   comparison = chewbbaca_output_comparator.iloc[:,1:] == chunk.iloc[:,1:]
   df_ST['matches'] = comparison.sum(axis=1)
-  return df_ST, nr_rows_chunk
+  return df_ST
 
 @timer
-def identify_cgMLST_isolate(profiles_file, chewbbaca_output, i):
+def identify_cgMLST_isolate(HC1100_representative, profiles_outdir, chewbbaca_output, i):
   '''
   Find cgMLST that most closely matches the allelic profile from chewBBACA output.
 
@@ -122,21 +123,19 @@ def identify_cgMLST_isolate(profiles_file, chewbbaca_output, i):
     Isolate name.
 
   '''
-  print('Starting results line number {}'.format(i))
-  df_full = pd.DataFrame(columns = ['ST', 'matches'])
-  reader = pd.read_csv(profiles_file, sep = '\t', chunksize=10000, dtype=str)
   chewbbaca_output_isolate = chewbbaca_output.iloc[[i]]
   isolate_name = chewbbaca_output_isolate.iloc[0,0].rstrip('.fasta')
-  total_nr_rows_processed = 0
-  for chunk in reader:
-    print('Processed {} lines for isolate {}'.format(total_nr_rows_processed, i))
-    df_ST, nr_rows_chunk = process_chunk(chunk, chewbbaca_output_isolate, i)
-    df_full = pd.concat([df_full, df_ST])
-    total_nr_rows_processed += nr_rows_chunk
-  df_full = df_full.sort_values('matches', ascending=False)
-  ST = df_full.iloc[0,:]['ST']
-  matching_alleles = int(df_full.iloc[0,:]['matches'])
-  return ST, matching_alleles, isolate_name
+  df_HC1100 = process_chunk(HC1100_representative, 'HC1100', chewbbaca_output_isolate, i)
+  df_HC1100 = df_HC1100.sort_values('matches', ascending=False)
+  selected_HC1100 = df_HC1100.iloc[0,:]['HC1100']
+
+  filepath = profiles_outdir + '/HC1100_' + str(selected_HC1100) + '.tsv'
+  chunk = pd.read_csv(filepath, sep = '\t', dtype=str)
+  df_ST = process_chunk(chunk, 'ST', chewbbaca_output_isolate, i)
+  df_ST = df_ST.sort_values('matches', ascending=False)
+  selected_ST = df_ST.iloc[0,:]['ST']
+  matching_alleles = int(df_ST.iloc[0,:]['matches'])
+  return selected_ST, matching_alleles, isolate_name
 
 def select_hierCC(df_ST_to_hierCC, ST):
   '''
@@ -206,18 +205,23 @@ def collect_output_data(selected_df, isolate_name, matching_alleles, nr_loci):
     If fewer or more than four columns are added to the supplied DataFrame.
 
   '''
-  nr_columns_original = len(selected_df.columns)
   hierCC_threshold = nr_loci - matching_alleles
+  levels_dict = {'HC20': 20, 'HC50': 50, 'HC100': 100, 'HC200': 200, 'HC400': 400, 'HC1100': 1100, 'unreliable': 9999}
+  for confidence_level, threshold in levels_dict.items():
+    if hierCC_threshold <= threshold:
+      break
+  nr_columns_original = len(selected_df.columns)
   selected_df.insert(0, 'isolate_name', [isolate_name])
   selected_df.insert(1, 'matching_alleles', [matching_alleles])
   selected_df.insert(2, 'max_mismatches', [hierCC_threshold])
-  selected_df.insert(3, 'nr_loci', [nr_loci])
+  selected_df.insert(3, 'confidence_level', [confidence_level])
+  selected_df.insert(4, 'nr_loci', [nr_loci])
   nr_columns_final = len(selected_df.columns)
   nr_columns_difference = nr_columns_final - nr_columns_original
-  if nr_columns_difference == 4:
+  if nr_columns_difference == 5:
     return selected_df
   else:
-    raise Exception('Expected 4 columns would be inserted, but {} columns were inserted'.format(nr_columns_differences))
+    raise Exception('Expected 5 columns would be inserted, but {} columns were inserted'.format(nr_columns_differences))
 
 @timer
 def main(args):
@@ -241,16 +245,16 @@ def main(args):
   chewBBACA excludes a small percent of the Enterobase cgMLST alleles. This results that chewBBACA profiles will never fully match the Enterobase cgMLST scheme, but can come pretty close.
   '''
   # Load chewbbaca output and table linking ST to hierCC
-  chewbbaca_output, nr_loci = load_results(args.profiles, args.input)
+  HC1100_representative, chewbbaca_output, nr_loci = load_results(args.HC1100_representative, args.input)
   df_ST_to_hierCC = pd.read_csv(args.st_to_hiercc, sep = '\t', dtype=str)
   # Init df which will be written to output
   output_df = pd.DataFrame()
   # Loop over chewbbaca output
   for i in range(chewbbaca_output.shape[0]):
     # identify most closely matching cgMLST
-    ST, matching_alleles, isolate_name = identify_cgMLST_isolate(args.profiles, chewbbaca_output, i)
+    selected_ST, matching_alleles, isolate_name = identify_cgMLST_isolate(HC1100_representative, args.profiles_outdir, chewbbaca_output, i)
     # Select corresponding hierCCs
-    selected_df = select_hierCC(df_ST_to_hierCC, ST)
+    selected_df = select_hierCC(df_ST_to_hierCC, selected_ST)
     # Collect output data
     selected_df_added = collect_output_data(selected_df, isolate_name, matching_alleles, nr_loci)
     # Concat results to output df
@@ -263,10 +267,11 @@ if __name__ == "__main__":
   # Parse arguments
   parser = argparse.ArgumentParser(description='Link chewBBACA typing results to Enterobase cgMLST and corresponding hierCCs.')
 
-  parser.add_argument('-p', '--profiles', dest='profiles', help="List of cgMLST profiles", type=str, required=True)
+  parser.add_argument('-p', '--profiles', dest='profiles_outdir', help="Directory where profiles are stored", type=str, required=True)
   parser.add_argument('-i', '--input', dest='input', help="Input typing from chewBBACA", type=str, required=True)
   parser.add_argument('-o', '--output', dest='output', help="Output file", type=str, required=True)
   parser.add_argument('-s', '--st-to-hiercc', dest='st_to_hiercc', help="Table relating ST to hierCC levels", type=str, required=True)
+  parser.add_argument('-r', '--representatives', dest='HC1100_representative', help="Table with HC1100 representatives", type=str, required=True)
 
   args = parser.parse_args()
 
